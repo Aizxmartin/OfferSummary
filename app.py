@@ -3,6 +3,7 @@ import streamlit as st
 from PyPDF2 import PdfReader
 from docx import Document
 import tempfile
+import os
 import re
 
 def extract_contract_summary(text):
@@ -14,7 +15,7 @@ def extract_contract_summary(text):
         else "☒ Tenants In Common" if "☒ Tenants In Common" in text or "X Tenants In Common" in text
         else "None Selected"
     )
-    fields = {
+    patterns = {
         "2.5.3. Other Inclusions": r"2\.5\.3\..*?included in the Purchase Price:\s*(.*?)\s*If the box",
         "2.6. Exclusions": r"2\.6\. Exclusions:\s*(.*?)\s*2\.7",
         "3.1. Time of Day Deadline": r"Time of Day Deadline\s*(\S+)",
@@ -40,44 +41,41 @@ def extract_contract_summary(text):
         "Section 29 (29.1/29.2/29.3)": r"29\.1.*?(\d\.\d+%) of the Purchase Price",
         "Section 30 Additional Provisions": r"30.*?Additional Provisions.*?Seller agrees to (.*?)\."
     }
-    for key, pattern in fields.items():
+    for field, pattern in patterns.items():
         match = re.search(pattern, text, re.DOTALL)
-        summary[key] = match.group(1).strip() if match else "Not found"
+        summary[field] = match.group(1).strip() if match else "Not found"
     return summary
 
-def main():
+def run_app():
     st.title("Contract Summary Table Generator")
-    uploaded_file = st.file_uploader("Upload Contract PDF", type="pdf")
+    uploaded = st.file_uploader("Upload a Colorado Contract PDF", type="pdf")
 
-    if uploaded_file:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
-            tmp_file.write(uploaded_file.read())
-            tmp_path = tmp_file.name
+    if uploaded:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            tmp.write(uploaded.read())
+            pdf_path = tmp.name
 
-        reader = PdfReader(tmp_path)
-        full_text = ""
-        for page in reader.pages:
-            full_text += page.extract_text()
+        reader = PdfReader(pdf_path)
+        contract_text = "".join([page.extract_text() or "" for page in reader.pages])
 
-        summary = extract_contract_summary(full_text)
+        data = extract_contract_summary(contract_text)
 
         doc = Document()
         doc.add_heading("Contract Summary Table", 0)
         table = doc.add_table(rows=1, cols=2)
         table.style = 'Table Grid'
-        hdr_cells = table.rows[0].cells
-        hdr_cells[0].text = 'Field'
-        hdr_cells[1].text = 'Extracted Value'
+        table.rows[0].cells[0].text = "Field"
+        table.rows[0].cells[1].text = "Extracted Value"
+        for field, value in data.items():
+            row = table.add_row().cells
+            row[0].text = field
+            row[1].text = value
 
-        for key, val in summary.items():
-            row_cells = table.add_row().cells
-            row_cells[0].text = key
-            row_cells[1].text = val
+        output_docx_path = os.path.join(tempfile.gettempdir(), "Contract_Summary_Table.docx")
+        doc.save(output_docx_path)
 
-        output_path = os.path.join(tempfile.gettempdir(), "Contract_Summary_Table.docx")
-        doc.save(output_path)
-        with open(output_path, "rb") as f:
-            st.download_button("Download DOCX Summary", f, file_name="Contract_Summary_Table.docx")
+        with open(output_docx_path, "rb") as file:
+            st.download_button("Download DOCX Summary", file, file_name="Contract_Summary_Table.docx")
 
 if __name__ == "__main__":
-    main()
+    run_app()
